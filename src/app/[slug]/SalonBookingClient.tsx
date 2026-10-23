@@ -1,47 +1,21 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Header } from '@/components/Header';
-import { BookingProgress, BookingStep } from '@/components/BookingProgress';
-import { ServiceSelector } from '@/components/ServiceSelector';
-import { StaffSelector } from '@/components/StaffSelector';
-import { CalendarSelector } from '@/components/CalendarSelector';
-import { CustomerForm } from '@/components/CustomerForm';
-import { BookingSummaryBar } from '@/components/BookingSummaryBar';
-import { NativeConfirmationModal } from '@/components/NativeConfirmationModal';
-import {
-  SalonInfo,
-  ServiceItem,
-  ServiceOption,
-  SelectedServiceItem,
-  StaffMember,
-  CustomerData,
-  AppointmentConfirmation,
-} from '@/types/booking';
+import { Navbar } from '@/components/Navbar';
+import { ServiceCard } from '@/components/ServiceCard';
+import { BookingBar } from '@/components/BookingBar';
+import { BookingDrawerModal } from '@/components/BookingDrawerModal';
+import { SalonInfo, ServiceItem, SelectedServiceItem } from '@/types/booking';
 import { fetchSalonData, DEMO_SALON } from '@/lib/api';
-import { parseWeeklySchedule } from '@/lib/openingHours';
-import { format } from 'date-fns';
+import { Search } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export function SalonBookingClient({ slug }: { slug: string }) {
   const [salon, setSalon] = useState<SalonInfo | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [currentStep, setCurrentStep] = useState<BookingStep>('services');
-
-  // Booking states
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedItems, setSelectedItems] = useState<SelectedServiceItem[]>([]);
-  const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [selectedSlot, setSelectedSlot] = useState<string>('');
-  const [customer, setCustomer] = useState<CustomerData>({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    email: '',
-    notes: '',
-  });
-
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [confirmation, setConfirmation] = useState<AppointmentConfirmation | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
 
   useEffect(() => {
     async function load() {
@@ -49,12 +23,13 @@ export function SalonBookingClient({ slug }: { slug: string }) {
       try {
         const data = await fetchSalonData(slug);
         setSalon(data);
-        if (data.staff && data.staff.length > 0) {
-          setSelectedStaff(data.staff[0]); // default to "Sans préférence"
+        if (data.categories && data.categories.length > 0) {
+          setSelectedCategoryId(data.categories[0].id);
         }
       } catch (e) {
         console.error('Error loading salon:', e);
         setSalon(DEMO_SALON);
+        setSelectedCategoryId(DEMO_SALON.categories[0].id);
       } finally {
         setIsLoading(false);
       }
@@ -64,288 +39,167 @@ export function SalonBookingClient({ slug }: { slug: string }) {
 
   if (isLoading || !salon) {
     return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--bg-main)',
-        gap: '16px',
-      }}>
-        <div style={{
-          width: '42px',
-          height: '42px',
-          borderRadius: '50%',
-          border: '3px solid var(--border)',
-          borderTopColor: 'var(--primary)',
-          animation: 'spin 0.8s linear infinite',
-        }} />
-        <div style={{ fontSize: '14px', color: 'var(--text-muted)', fontWeight: 600 }}>
-          Chargement de votre salon...
+      <div className="min-h-screen flex items-center justify-center bg-[#f9fafb]">
+        <div className="flex flex-col items-center gap-2">
+          <div className="w-6 h-6 border-2 border-black border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-gray-500 font-medium">Chargement du salon...</span>
         </div>
-        <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
-  const weeklySchedule = parseWeeklySchedule(salon.weeklyScheduleJson);
-
-  // Compute total duration of all selected services + options
-  const totalDurationMinutes = selectedItems.reduce((sum, item) => {
-    const optsDur = item.selectedOptions.reduce((s, o) => s + (o.durationMinutes || 0), 0);
-    return sum + item.service.durationMinutes + optsDur;
-  }, 0);
-
-  // Compute total price
-  const totalPrice = selectedItems.reduce((sum, item) => {
-    const optsPrice = item.selectedOptions.reduce((s, o) => s + o.price, 0);
-    return sum + item.service.price + optsPrice;
-  }, 0);
-
-  // Service toggle handler
   const handleToggleService = (service: ServiceItem) => {
-    setErrorMessage(null);
     setSelectedItems((prev) => {
-      const exists = prev.some((item) => item.service.id === service.id);
+      const exists = prev.some((it) => it.service.id === service.id);
       if (exists) {
-        return prev.filter((item) => item.service.id !== service.id);
+        return prev.filter((it) => it.service.id !== service.id);
       } else {
         return [...prev, { service, selectedOptions: [] }];
       }
     });
   };
 
-  // Option toggle handler
-  const handleToggleOption = (serviceId: string, option: ServiceOption) => {
-    setSelectedItems((prev) =>
-      prev.map((item) => {
-        if (item.service.id !== serviceId) return item;
-        const optExists = item.selectedOptions.some((o) => o.id === option.id);
-        const newOpts = optExists
-          ? item.selectedOptions.filter((o) => o.id !== option.id)
-          : [...item.selectedOptions, option];
-        return { ...item, selectedOptions: newOpts };
-      })
-    );
-  };
-
-  const handleCustomerChange = (field: keyof CustomerData, value: string) => {
-    setErrorMessage(null);
-    setCustomer((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const canNavigateTo = (step: BookingStep): boolean => {
-    if (step === 'services') return true;
-    if (step === 'staff') return selectedItems.length > 0;
-    if (step === 'datetime') return selectedItems.length > 0 && selectedStaff !== null;
-    if (step === 'details')
-      return selectedItems.length > 0 && selectedStaff !== null && selectedSlot !== '';
-    return false;
-  };
-
-  const handleNextStep = async () => {
-    setErrorMessage(null);
-
-    if (currentStep === 'services') {
-      if (selectedItems.length === 0) {
-        setErrorMessage('Veuillez sélectionner au moins une prestation pour continuer.');
-        return;
-      }
-      setCurrentStep('staff');
-      window.scrollTo({ top: 220, behavior: 'smooth' });
-    } else if (currentStep === 'staff') {
-      if (!selectedStaff) {
-        setSelectedStaff(salon.staff[0]);
-      }
-      setCurrentStep('datetime');
-      window.scrollTo({ top: 220, behavior: 'smooth' });
-    } else if (currentStep === 'datetime') {
-      if (!selectedSlot) {
-        setErrorMessage('Veuillez sélectionner un créneau horaire disponible.');
-        return;
-      }
-      setCurrentStep('details');
-      window.scrollTo({ top: 220, behavior: 'smooth' });
-    } else if (currentStep === 'details') {
-      // Validate customer details
-      if (!customer.firstName.trim() || !customer.lastName.trim()) {
-        setErrorMessage('Veuillez renseigner votre nom et votre prénom.');
-        return;
-      }
-      if (!customer.phone.trim() || customer.phone.length < 8) {
-        setErrorMessage('Veuillez renseigner un numéro de téléphone portable valide.');
-        return;
-      }
-      if (!customer.email.trim() || !customer.email.includes('@')) {
-        setErrorMessage('Veuillez renseigner une adresse email valide.');
-        return;
-      }
-
-      // Submit booking
-      setIsSubmitting(true);
-      try {
-        const dateStr = format(selectedDate, 'yyyy-MM-dd');
-        const bookingId = 'BK-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-
-        // Optional API call to MiamPOS backend
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://miampos-dashboard.vercel.app';
-        try {
-          await fetch(`${apiUrl}/api/store/orders`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              slug: salon.slug,
-              orderType: 'BOOKING',
-              customerName: `${customer.firstName} ${customer.lastName}`,
-              customerPhone: customer.phone,
-              customerEmail: customer.email,
-              pickupTime: `${dateStr} ${selectedSlot}`,
-              orderNote: `[RDV SALON] Praticien: ${selectedStaff?.name} | Durée: ${totalDurationMinutes} min | Note: ${customer.notes || 'Aucune'}`,
-              items: selectedItems.map((it) => ({
-                id: it.service.id,
-                name: it.service.name,
-                price: it.service.price,
-                quantity: 1,
-                options: it.selectedOptions.map((o) => o.name),
-              })),
-            }),
-          });
-        } catch (apiErr) {
-          console.warn('[SalonBooking] Backend order sync warning:', apiErr);
-        }
-
-        // Set native confirmation modal state
-        setConfirmation({
-          bookingId,
-          salonName: salon.name,
-          salonSlug: salon.slug,
-          salonAddress: salon.address,
-          salonPhone: salon.phone,
-          date: dateStr,
-          timeSlot: selectedSlot,
-          staffMember: selectedStaff || salon.staff[0],
-          items: selectedItems,
-          totalDurationMinutes,
-          totalPrice,
-          customer,
-          createdAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.error('Booking submission error:', err);
-        setErrorMessage('Une erreur est survenue lors de la réservation. Veuillez réessayer.');
-      } finally {
-        setIsSubmitting(false);
-      }
+  // Filter services by category and search
+  const filteredCategories = salon.categories.filter((cat) => {
+    if (selectedCategoryId && selectedCategoryId !== 'all' && cat.id !== selectedCategoryId) {
+      return false;
     }
-  };
-
-  const handleReset = () => {
-    setConfirmation(null);
-    setSelectedItems([]);
-    setSelectedSlot('');
-    setCurrentStep('services');
-  };
+    return true;
+  });
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-main)' }}>
-      {/* Salon Header Hero */}
-      <Header salon={salon} />
+    <div className="min-h-screen bg-[#f9fafb] pb-32">
+      {/* Top Navbar */}
+      <Navbar salon={salon} />
 
-      {/* Main Container */}
-      <main className="booking-container">
-        {/* Step Progress Tracker */}
-        <BookingProgress
-          currentStep={currentStep}
-          onStepClick={(step) => {
-            setErrorMessage(null);
-            setCurrentStep(step);
-          }}
-          canNavigateTo={canNavigateTo}
-        />
-
-        {/* Error notification alert */}
-        {errorMessage && (
-          <div style={{
-            background: '#fef2f2',
-            border: '1.5px solid #fecaca',
-            color: '#b91c1c',
-            padding: '12px 16px',
-            borderRadius: 'var(--radius-md)',
-            fontSize: '13px',
-            fontWeight: 600,
-            marginBottom: '20px',
-            animation: 'fadeIn 0.2s ease-out',
-          }}>
-            {errorMessage}
-          </div>
-        )}
-
-        {/* Step 1: Services */}
-        {currentStep === 'services' && (
-          <ServiceSelector
-            categories={salon.categories}
-            selectedItems={selectedItems}
-            onToggleService={handleToggleService}
-            onToggleOption={handleToggleOption}
+      {/* Hero Announcement Banner if provided */}
+      {salon.bannerUrl && (
+        <div className="w-full h-40 sm:h-52 relative overflow-hidden bg-gray-900">
+          <img
+            src={salon.bannerUrl}
+            alt={salon.name}
+            className="w-full h-full object-cover"
           />
-        )}
+        </div>
+      )}
 
-        {/* Step 2: Staff */}
-        {currentStep === 'staff' && (
-          <StaffSelector
-            staffList={salon.staff}
-            selectedStaff={selectedStaff}
-            onSelectStaff={(st) => {
-              setSelectedStaff(st);
-              setErrorMessage(null);
-            }}
+      {/* Main Content Area */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
+        
+        {/* Salon Intro / Slogan */}
+        <div className="mb-6">
+          <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">
+            Réserver une prestation
+          </h1>
+          {salon.description && (
+            <p className="text-xs sm:text-sm text-gray-500 mt-1 max-w-2xl leading-relaxed">
+              {salon.description}
+            </p>
+          )}
+        </div>
+
+        {/* Search Bar */}
+        <div className="relative mb-5">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Rechercher une coupe, balayage, forfait, soin..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-2.5 bg-white border border-black/[0.08] rounded-xl text-xs sm:text-sm focus:outline-none focus:border-black shadow-xs transition"
           />
-        )}
+        </div>
 
-        {/* Step 3: Date & Slot */}
-        {currentStep === 'datetime' && (
-          <CalendarSelector
-            schedule={weeklySchedule}
-            totalDurationMinutes={totalDurationMinutes}
-            selectedDate={selectedDate}
-            selectedSlot={selectedSlot}
-            onSelectDate={(d) => {
-              setSelectedDate(d);
-              setSelectedSlot('');
-            }}
-            onSelectSlot={(s) => {
-              setSelectedSlot(s);
-              setErrorMessage(null);
-            }}
-          />
-        )}
+        {/* Category Pills (Sticky horizontal bar) */}
+        <div className="sticky top-16 z-20 bg-[#f9fafb]/90 backdrop-blur-md py-2.5 mb-6 -mx-4 px-4 sm:-mx-6 sm:px-6 overflow-x-auto hide-scrollbar flex items-center gap-2">
+          <button
+            onClick={() => setSelectedCategoryId('all')}
+            className={cn(
+              "px-4 py-2 rounded-full text-xs font-bold shrink-0 transition active:scale-95 cursor-pointer",
+              selectedCategoryId === 'all'
+                ? "bg-black text-white shadow-sm"
+                : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"
+            )}
+          >
+            Toutes les prestations
+          </button>
 
-        {/* Step 4: Customer Details */}
-        {currentStep === 'details' && (
-          <CustomerForm
-            customer={customer}
-            onChange={handleCustomerChange}
-          />
-        )}
+          {salon.categories.map((cat) => {
+            const isSelected = selectedCategoryId === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategoryId(cat.id)}
+                className={cn(
+                  "px-4 py-2 rounded-full text-xs font-bold shrink-0 transition active:scale-95 cursor-pointer",
+                  isSelected
+                    ? "bg-black text-white shadow-sm"
+                    : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-100"
+                )}
+              >
+                {cat.name}
+              </button>
+            );
+          })}
+        </div>
 
-        {/* Floating Bottom Summary & Action Bar */}
-        <BookingSummaryBar
-          currentStep={currentStep}
-          items={selectedItems}
-          staff={selectedStaff}
-          selectedDate={selectedDate}
-          selectedSlot={selectedSlot}
-          isSubmitting={isSubmitting}
-          onNext={handleNextStep}
-        />
+        {/* Services Grouped by Categories */}
+        <div className="space-y-8">
+          {filteredCategories.map((category) => {
+            const services = category.services.filter((s) => {
+              if (!searchQuery.trim()) return true;
+              const q = searchQuery.toLowerCase();
+              return s.name.toLowerCase().includes(q) || (s.description && s.description.toLowerCase().includes(q));
+            });
 
-        {/* Native confirmation modal on success */}
-        <NativeConfirmationModal
-          confirmation={confirmation}
-          onClose={handleReset}
-        />
+            if (services.length === 0) return null;
+
+            return (
+              <section key={category.id} className="space-y-3">
+                <div className="flex items-baseline justify-between border-b border-gray-100 pb-2">
+                  <h2 className="font-extrabold text-base text-gray-900 tracking-tight">
+                    {category.name}
+                  </h2>
+                  <span className="text-xs text-gray-400 font-medium">
+                    {services.length} prestation{services.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                  {services.map((service) => {
+                    const isSelected = selectedItems.some((it) => it.service.id === service.id);
+                    return (
+                      <ServiceCard
+                        key={service.id}
+                        service={service}
+                        isSelected={isSelected}
+                        onToggle={handleToggleService}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </div>
       </main>
+
+      {/* Sticky Bottom Summary Bar */}
+      <BookingBar
+        selectedItems={selectedItems}
+        onOpenBooking={() => setIsDrawerOpen(true)}
+      />
+
+      {/* Booking Slide-over Drawer Modal */}
+      <BookingDrawerModal
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        salon={salon}
+        selectedItems={selectedItems}
+        onCompleteBooking={() => {
+          setSelectedItems([]);
+        }}
+      />
     </div>
   );
 }
